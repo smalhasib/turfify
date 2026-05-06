@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_firebase_verifier
-from app.enums import BookingStatus, RefundStatus, UserRole
+from app.enums import RefundStatus, UserRole
 from app.main import app
 from app.models import Booking, Refund, User, Venue
 
@@ -87,9 +87,7 @@ async def test_preview_full_refund_far_future(
     )
     booking_id = hold.json()["booking_id"]
 
-    resp = await api_client.get(
-        f"/v1/bookings/{booking_id}/cancel-preview", headers=_auth(access)
-    )
+    resp = await api_client.get(f"/v1/bookings/{booking_id}/cancel-preview", headers=_auth(access))
     assert resp.status_code == 200
     data = resp.json()
     assert data["refund_amount_bdt"] == 1000
@@ -141,9 +139,7 @@ async def test_preview_zero_refund_within_window(
     )
     await db_session.commit()
 
-    resp = await api_client.get(
-        f"/v1/bookings/{booking_id}/cancel-preview", headers=_auth(access)
-    )
+    resp = await api_client.get(f"/v1/bookings/{booking_id}/cancel-preview", headers=_auth(access))
     assert resp.status_code == 200
     assert resp.json()["refund_amount_bdt"] == 0
 
@@ -223,9 +219,7 @@ async def test_customer_cancel_paid_requires_reauth(
 
     # Admin marks cash paid.
     admin = await _login(api_client, phone="+8801720100001", fb_uid="fb_admin_paid")
-    pay = await api_client.post(
-        f"/v1/bookings/{booking_id}/mark-cash-paid", headers=_auth(admin)
-    )
+    pay = await api_client.post(f"/v1/bookings/{booking_id}/mark-cash-paid", headers=_auth(admin))
     assert pay.status_code == 200
 
     # Customer attempts cancel without a fresh token → 401 reauth_required.
@@ -255,11 +249,7 @@ async def test_customer_cancel_paid_requires_reauth(
     assert body["refund_required"] is True
     assert body["refund_amount_bdt"] == 1000
     refund = (
-        (
-            await db_session.execute(
-                select(Refund).where(Refund.id == body["refund_id"])
-            )
-        )
+        (await db_session.execute(select(Refund).where(Refund.id == body["refund_id"])))
         .scalars()
         .one()
     )
@@ -287,9 +277,7 @@ async def test_customer_cancel_paid_stale_reauth_rejected(
     )
     booking_id = hold.json()["booking_id"]
     admin = await _login(api_client, phone="+8801720100003", fb_uid="fb_stale_admin")
-    await api_client.post(
-        f"/v1/bookings/{booking_id}/mark-cash-paid", headers=_auth(admin)
-    )
+    await api_client.post(f"/v1/bookings/{booking_id}/mark-cash-paid", headers=_auth(admin))
 
     # Re-OTP token issued > 5 min ago.
     _override_verifier_with_iat("+8801720100004", age_seconds=10 * 60)
@@ -332,9 +320,7 @@ async def test_admin_can_cancel_without_reauth(
     )
     booking_id = hold.json()["booking_id"]
 
-    admin = await _login(
-        api_client, phone="+8801720200001", fb_uid="fb_admincancel_admin"
-    )
+    admin = await _login(api_client, phone="+8801720200001", fb_uid="fb_admincancel_admin")
     resp = await api_client.post(
         f"/v1/bookings/{booking_id}/cancel",
         headers=_auth(admin),
@@ -351,9 +337,7 @@ async def test_admin_can_cancel_without_reauth(
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("clean_db")
-async def test_double_cancel_returns_409(
-    api_client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_double_cancel_returns_409(api_client: AsyncClient, db_session: AsyncSession) -> None:
     venue = await _make_venue(db_session)
     await db_session.commit()
     access = await _login(api_client, phone="+8801720300001", fb_uid="fb_double")

@@ -74,9 +74,7 @@ async def test_receipt_returns_pdf_for_owner(
     )
     booking_id = hold.json()["booking_id"]
 
-    resp = await api_client.get(
-        f"/v1/bookings/{booking_id}/receipt.pdf", headers=_auth(access)
-    )
+    resp = await api_client.get(f"/v1/bookings/{booking_id}/receipt.pdf", headers=_auth(access))
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"] == "application/pdf"
     assert resp.headers["content-disposition"].startswith("attachment;")
@@ -107,9 +105,7 @@ async def test_receipt_404_for_other_user(
     )
     booking_id = hold.json()["booking_id"]
 
-    resp = await api_client.get(
-        f"/v1/bookings/{booking_id}/receipt.pdf", headers=_auth(intruder)
-    )
+    resp = await api_client.get(f"/v1/bookings/{booking_id}/receipt.pdf", headers=_auth(intruder))
     assert resp.status_code == 404
 
 
@@ -135,9 +131,7 @@ async def test_receipt_admin_can_download_anyones(
     )
     booking_id = hold.json()["booking_id"]
 
-    admin_access = await _login(
-        api_client, phone="+8801719000004", fb_uid="fb_pdf_admin"
-    )
+    admin_access = await _login(api_client, phone="+8801719000004", fb_uid="fb_pdf_admin")
     resp = await api_client.get(
         f"/v1/bookings/{booking_id}/receipt.pdf", headers=_auth(admin_access)
     )
@@ -147,8 +141,6 @@ async def test_receipt_admin_can_download_anyones(
 
 @pytest.mark.integration
 @pytest.mark.usefixtures("clean_db")
-async def test_receipt_requires_auth(
-    api_client: AsyncClient, db_session: AsyncSession
-) -> None:
+async def test_receipt_requires_auth(api_client: AsyncClient, db_session: AsyncSession) -> None:
     resp = await api_client.get("/v1/bookings/1/receipt.pdf")
     assert resp.status_code == 401
