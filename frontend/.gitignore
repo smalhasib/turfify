@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+
+.env
+.env.*
+!.env.example
+
+*.tsbuildinfo
+next-env.d.ts

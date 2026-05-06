@@ -1,0 +1,70 @@
+name: turfify-dev
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: turfify-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: turfify
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d turfify"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: turfify-redis
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  adminer:
+    image: adminer:latest
+    container_name: turfify-adminer
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: dracula
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Mailpit — local SMTP catcher.
+  # Disabled until email work begins (Phase 2 email activation).
+  # Uncomment + run `docker compose up -d mailpit` when needed.
+  # mailpit:
+  #   image: axllent/mailpit:latest
+  #   container_name: turfify-mailpit
+  #   restart: unless-stopped
+  #   ports:
+  #     - "1025:1025"  # SMTP
+  #     - "8025:8025"  # Web UI
+  #   environment:
+  #     MP_MAX_MESSAGES: 5000
+  #     MP_SMTP_AUTH_ACCEPT_ANY: 1
+  #     MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+volumes:
+  postgres_data:
+    name: turfify_postgres_data
+  redis_data:
+    name: turfify_redis_data
