@@ -66,7 +66,7 @@ backend-lint:
 
 # --- Frontend ---
 frontend-install:
-	cd frontend && pnpm install
+	cd frontend && pnpm install --config.dangerouslyAllowAllBuilds=true
 
 frontend-dev:
 	cd frontend && pnpm dev
