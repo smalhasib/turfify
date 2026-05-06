@@ -105,7 +105,7 @@ test.describe("Phase 2 auth UI", () => {
 
     await page.waitForURL("**/me", { timeout: 10_000 });
     await expect(page.getByTestId("me-phone")).toHaveText(TEST_PHONE);
-    await expect(page.getByTestId("me-role")).toHaveText("customer");
+    await expect(page.getByTestId("me-role")).toHaveText("Player");
   });
 
   test("logout clears session", async ({ page }) => {

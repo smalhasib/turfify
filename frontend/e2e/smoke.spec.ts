@@ -1,9 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Phase 0 smoke", () => {
-  test("home page renders Turfify heading", async ({ page }) => {
+  test("home page renders Turfify wordmark + CTA", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Turfify" })).toBeVisible();
+    await expect(page.getByLabel("Turfify home")).toBeVisible();
     await expect(page.getByTestId("cta-signin")).toBeVisible();
   });
 

@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Header } from "@/components/ui/Header";
 import { logout } from "@/lib/auth";
 import { type AuthUser, useAuthHydrated, useAuthStore } from "@/lib/authStore";
 import { getApiClient } from "@/lib/api";
@@ -53,36 +55,61 @@ export default function MePage() {
   }
 
   if (loading) {
-    return <p className="p-12 text-sm text-neutral-500">Loading…</p>;
+    return (
+      <>
+        <Header />
+        <main className="mx-auto max-w-2xl p-2xl text-sm text-ink-mute">Loading…</main>
+      </>
+    );
   }
   if (!user) {
     return null;
   }
 
+  const roleLabel: Record<AuthUser["role"], string> = {
+    customer: "Player",
+    staff: "Staff",
+    admin: "Admin",
+  };
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-6 py-12">
-      <h1 className="text-3xl font-bold tracking-tight text-brand-700">Welcome</h1>
-      <dl
-        className="grid grid-cols-[8rem_1fr] gap-y-2 rounded border border-neutral-200 p-6 text-sm"
-        data-testid="me-card"
-      >
-        <dt className="font-medium text-neutral-500">Phone</dt>
-        <dd data-testid="me-phone">{user.phone}</dd>
-        <dt className="font-medium text-neutral-500">Name</dt>
-        <dd>{user.name ?? "—"}</dd>
-        <dt className="font-medium text-neutral-500">Role</dt>
-        <dd className="capitalize" data-testid="me-role">
-          {user.role}
-        </dd>
-      </dl>
-      <button
-        type="button"
-        onClick={onLogout}
-        data-testid="logout"
-        className="self-start rounded border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-100"
-      >
-        Sign out
-      </button>
-    </main>
+    <>
+      <Header />
+      <main className="mx-auto flex w-full max-w-2xl flex-col gap-lg px-md py-2xl">
+        <div className="flex flex-col gap-2xs">
+          <p className="label-caps text-brand">Profile</p>
+          <h1 className="stadium-display text-5xl uppercase text-ink">
+            {user.name ? `Hey, ${user.name}.` : "Welcome."}
+          </h1>
+        </div>
+
+        <dl
+          className="grid gap-sm border-t border-rule pt-md sm:grid-cols-2"
+          data-testid="me-card"
+        >
+          <Row label="Phone" value={user.phone} testid="me-phone" />
+          <Row label="Role" value={roleLabel[user.role]} testid="me-role" />
+          <Row label="Name" value={user.name ?? "—"} />
+          <Row label="Email" value={user.email ?? "Not set"} />
+        </dl>
+
+        <div className="flex flex-wrap gap-sm pt-md">
+          <Button variant="outline" onClick={onLogout} data-testid="logout">
+            Sign out
+          </Button>
+        </div>
+      </main>
+    </>
+  );
+}
+
+function Row({ label, value, testid }: { label: string; value: string; testid?: string }) {
+  return (
+    <div className="flex flex-col gap-3xs">
+      <dt className="label-caps text-ink-soft">{label}</dt>
+      <dd className="font-sans text-base text-ink" data-testid={testid}>
+        {value}
+      </dd>
+    </div>
   );
 }

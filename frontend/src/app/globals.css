@@ -2,6 +2,157 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   Turfify design tokens. See .impeccable.md for the full system.
+   Theme: stadium under floodlights at evening kickoff.
+   ============================================================ */
+
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
+
+  /* Brand */
+  --color-brand: oklch(0.55 0.16 145);
+  --color-brand-deep: oklch(0.32 0.10 145);
+  --color-accent: oklch(0.74 0.17 70);
+  --color-accent-deep: oklch(0.55 0.16 65);
+
+  /* Light surfaces (default) */
+  --color-bg: oklch(0.985 0.005 95);
+  --color-surface: oklch(0.97 0.008 145);
+  --color-surface-2: oklch(0.93 0.01 145);
+  --color-ink: oklch(0.2 0.02 145);
+  --color-ink-soft: oklch(0.45 0.015 145);
+  --color-ink-mute: oklch(0.62 0.01 145);
+  --color-rule: oklch(0.88 0.01 145);
+  --color-rule-strong: oklch(0.75 0.012 145);
+
+  /* States */
+  --color-success: oklch(0.62 0.14 150);
+  --color-danger: oklch(0.58 0.2 27);
+
+  /* Typography */
+  --font-display: var(--font-display-loaded), "Big Shoulders Display", system-ui, sans-serif;
+  --font-sans: var(--font-sans-loaded), "Hanken Grotesk", system-ui, sans-serif;
+
+  /* Motion */
+  --ease-out-quart: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Spacing scale (4pt) */
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+
+  /* Radii */
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1.25rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: oklch(0.16 0.014 240);
+    --color-surface: oklch(0.21 0.016 240);
+    --color-surface-2: oklch(0.27 0.018 240);
+    --color-ink: oklch(0.96 0.01 95);
+    --color-ink-soft: oklch(0.78 0.012 95);
+    --color-ink-mute: oklch(0.58 0.01 95);
+    --color-rule: oklch(0.32 0.014 240);
+    --color-rule-strong: oklch(0.42 0.016 240);
+  }
+}
+
+[data-theme="light"] {
+  --color-bg: oklch(0.985 0.005 95);
+  --color-surface: oklch(0.97 0.008 145);
+  --color-surface-2: oklch(0.93 0.01 145);
+  --color-ink: oklch(0.2 0.02 145);
+  --color-ink-soft: oklch(0.45 0.015 145);
+  --color-ink-mute: oklch(0.62 0.01 145);
+  --color-rule: oklch(0.88 0.01 145);
+  --color-rule-strong: oklch(0.75 0.012 145);
+}
+
+[data-theme="dark"] {
+  --color-bg: oklch(0.16 0.014 240);
+  --color-surface: oklch(0.21 0.016 240);
+  --color-surface-2: oklch(0.27 0.018 240);
+  --color-ink: oklch(0.96 0.01 95);
+  --color-ink-soft: oklch(0.78 0.012 95);
+  --color-ink-mute: oklch(0.58 0.01 95);
+  --color-rule: oklch(0.32 0.014 240);
+  --color-rule-strong: oklch(0.42 0.016 240);
+}
+
+@layer base {
+  html {
+    background: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: var(--color-bg);
+    color: var(--color-ink);
+  }
+
+  ::selection {
+    background: var(--color-accent);
+    color: oklch(0.18 0.02 145);
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-accent-deep);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+}
+
+@layer components {
+  /* Brand wordmark used in header. */
+  .wordmark {
+    font-family: var(--font-display);
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    font-variation-settings: "wdth" 100;
+  }
+
+  /* The big stadium-time numerals (e.g., 4:00 PM slot heading). */
+  .stadium-display {
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 0.95;
+    letter-spacing: -0.015em;
+  }
+
+  /* Small all-caps label, scoreboard style. */
+  .label-caps {
+    font-family: var(--font-sans);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--color-ink-soft);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

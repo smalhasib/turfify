@@ -4,6 +4,10 @@ import { type ConfirmationResult } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+import { Field } from "@/components/ui/Field";
+import { Header } from "@/components/ui/Header";
+import { Input } from "@/components/ui/Input";
 import {
   AuthFlowError,
   completePhoneAuth,
@@ -60,93 +64,99 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
-      <h1 className="text-3xl font-bold tracking-tight text-brand-700">Sign in</h1>
-      <p className="mt-2 text-sm text-neutral-600">
-        Use your Bangladesh mobile number to receive a one-time code.
-      </p>
-
-      {stage === "phone" && (
-        <form onSubmit={onSubmitPhone} className="mt-8 space-y-4" data-testid="phone-form">
-          <label className="block text-sm font-medium text-neutral-700">
-            Phone number
-            <input
-              type="tel"
-              inputMode="tel"
-              name="phone"
-              data-testid="phone-input"
-              className="mt-1 block w-full rounded border border-neutral-300 px-3 py-2 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value.trim())}
-              placeholder="+8801XXXXXXXXX"
-              required
-            />
-          </label>
-
-          <button
-            type="submit"
-            data-testid="send-code"
-            disabled={busy}
-            className="w-full rounded bg-brand-600 px-4 py-2 font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {busy ? "Sending…" : "Send code"}
-          </button>
-        </form>
-      )}
-
-      {stage === "otp" && (
-        <form onSubmit={onSubmitCode} className="mt-8 space-y-4" data-testid="otp-form">
-          <p className="text-sm text-neutral-600">
-            Enter the 6-digit code sent to <span className="font-medium">{phone}</span>
+    <>
+      <Header />
+      <main className="mx-auto flex w-full max-w-md flex-col gap-md px-md py-2xl">
+        <div className="flex flex-col gap-2xs">
+          <p className="label-caps text-brand">Sign in</p>
+          <h1 className="stadium-display text-5xl uppercase text-ink">
+            {stage === "phone" ? "Phone first." : "Six digits."}
+          </h1>
+          <p className="text-sm text-ink-soft">
+            {stage === "phone"
+              ? "We text you a one-time code. No passwords."
+              : `Code sent to ${phone}. It expires in a few minutes.`}
           </p>
-          <label className="block text-sm font-medium text-neutral-700">
-            One-time code
-            <input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              minLength={6}
-              data-testid="otp-input"
-              className="mt-1 block w-full rounded border border-neutral-300 px-3 py-2 tracking-widest outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              value={code}
-              onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
-              required
-            />
-          </label>
-          <button
-            type="submit"
-            data-testid="verify-code"
-            disabled={busy || code.length < 6}
-            className="w-full rounded bg-brand-600 px-4 py-2 font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-          >
-            {busy ? "Verifying…" : "Verify"}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setStage("phone");
-              setCode("");
-              setConfirmation(null);
-            }}
-            className="block w-full text-center text-sm text-neutral-500 hover:text-neutral-700"
-          >
-            Use a different number
-          </button>
-        </form>
-      )}
+        </div>
 
-      {error && (
-        <p
-          role="alert"
-          data-testid="login-error"
-          className="mt-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-        >
-          {error}
-        </p>
-      )}
+        {stage === "phone" && (
+          <form onSubmit={onSubmitPhone} className="flex flex-col gap-md" data-testid="phone-form">
+            <Field label="Bangladesh mobile" htmlFor="phone-input" hint="+8801XXXXXXXXX">
+              <Input
+                id="phone-input"
+                type="tel"
+                inputMode="tel"
+                name="phone"
+                data-testid="phone-input"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value.trim())}
+                placeholder="+8801712345678"
+                autoComplete="tel"
+                required
+                invalid={Boolean(error) && stage === "phone"}
+              />
+            </Field>
+            <Button type="submit" data-testid="send-code" loading={busy} size="lg">
+              {busy ? "Sending" : "Send code"}
+            </Button>
+          </form>
+        )}
 
-      <div id="recaptcha-container" className="mt-6" />
-    </main>
+        {stage === "otp" && (
+          <form onSubmit={onSubmitCode} className="flex flex-col gap-md" data-testid="otp-form">
+            <Field label="One-time code" htmlFor="otp-input">
+              <Input
+                id="otp-input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                minLength={6}
+                data-testid="otp-input"
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                className="stadium-display tracking-[0.4em] text-2xl text-center"
+                required
+                invalid={Boolean(error) && stage === "otp"}
+              />
+            </Field>
+            <Button
+              type="submit"
+              data-testid="verify-code"
+              loading={busy}
+              disabled={code.length < 6}
+              size="lg"
+            >
+              {busy ? "Verifying" : "Verify"}
+            </Button>
+            <button
+              type="button"
+              onClick={() => {
+                setStage("phone");
+                setCode("");
+                setConfirmation(null);
+                setError(null);
+              }}
+              className="self-center text-sm text-ink-soft underline-offset-4 hover:text-ink hover:underline"
+            >
+              Use a different number
+            </button>
+          </form>
+        )}
+
+        {error && (
+          <p
+            role="alert"
+            data-testid="login-error"
+            className="rounded-xs border border-[var(--color-danger)] bg-surface px-sm py-xs text-sm text-[var(--color-danger)]"
+          >
+            {error}
+          </p>
+        )}
+
+        <div id="recaptcha-container" className="mt-md" />
+      </main>
+    </>
   );
 }
