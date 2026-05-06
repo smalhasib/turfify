@@ -1,7 +1,7 @@
 .PHONY: help up down logs ps reset \
-        backend-install backend-dev backend-test backend-lint \
+        backend-install backend-dev backend-test backend-lint backend-seed \
         frontend-install frontend-dev frontend-test frontend-e2e frontend-lint \
-        test
+        demo demo-reset test
 
 help:
 	@echo "Turfify — Development commands"
@@ -79,6 +79,28 @@ frontend-e2e:
 
 frontend-lint:
 	cd frontend && pnpm lint && pnpm type-check
+
+# --- Backend seeds ---
+backend-seed:
+	cd backend && .venv/bin/python -m app.seed
+
+backend-seed-demo:
+	cd backend && .venv/bin/python -m app.seed_demo
+
+# --- Demo workflow ---
+# Brings up infra, seeds demo data, prints next-steps for the tunnel.
+demo: up backend-seed-demo
+	@echo ""
+	@echo "Demo state ready. Now run in two terminals:"
+	@echo "  1) make backend-dev      # FastAPI on :8800"
+	@echo "  2) make frontend-dev     # Next.js on :3000"
+	@echo "  3) cloudflared tunnel run turf-demo"
+	@echo ""
+	@echo "Then share https://demo.turf.smalhasib.com with the client."
+
+# Wipes data volumes + recreates demo state. Useful between demos.
+demo-reset: reset backend-seed backend-seed-demo
+	@echo "Demo state reset."
 
 # --- Everything ---
 test: backend-test frontend-test frontend-e2e

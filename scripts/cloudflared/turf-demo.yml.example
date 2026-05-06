@@ -1,0 +1,21 @@
+# Cloudflare Tunnel config for the Turfify demo workflow.
+#
+# Copy this to ~/.cloudflared/turf-demo.yml and fill in:
+#   tunnel:           <uuid printed by `cloudflared tunnel create turf-demo`>
+#   credentials-file: <path to the JSON credentials file Cloudflare wrote>
+#
+# Then add DNS records at Cloudflare for `smalhasib.com`:
+#   demo.turf.smalhasib.com      CNAME <uuid>.cfargotunnel.com   (proxied)
+#   api.demo.turf.smalhasib.com  CNAME <uuid>.cfargotunnel.com   (proxied)
+#
+# Run with: cloudflared tunnel run turf-demo
+
+tunnel: <REPLACE_WITH_TUNNEL_UUID>
+credentials-file: /Users/smalhasib/.cloudflared/<REPLACE_WITH_TUNNEL_UUID>.json
+
+ingress:
+  - hostname: api.demo.turf.smalhasib.com
+    service: http://localhost:8800
+  - hostname: demo.turf.smalhasib.com
+    service: http://localhost:3000
+  - service: http_status:404
