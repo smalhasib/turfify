@@ -65,6 +65,23 @@ export default function HomePage() {
           </Step>
         </section>
       </main>
+
+      <footer className="mt-3xl border-t border-rule">
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-sm px-md py-md text-xs text-ink-mute">
+          <span>© 2026 Turfify</span>
+          <nav className="flex gap-md">
+            <Link href="/privacy" className="hover:text-ink">
+              Privacy
+            </Link>
+            <Link href="/terms" className="hover:text-ink">
+              Terms
+            </Link>
+            <Link href="/refund-policy" className="hover:text-ink">
+              Refund policy
+            </Link>
+          </nav>
+        </div>
+      </footer>
     </>
   );
 }

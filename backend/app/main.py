@@ -39,7 +39,14 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Turfify API",
-    description="Turf Management & Booking Platform",
+    description=(
+        "Turf Management & Booking Platform — Bangladesh-first, mobile-first.\n\n"
+        "**Auth:** Firebase phone OTP -> app JWT (15-min access, 30-day refresh). "
+        "**Payments:** Cash on arrival in production today; bKash sandbox path "
+        "stubbed for the next phase.\n\n"
+        "Most endpoints require a `Authorization: Bearer <jwt>` header. "
+        "Public endpoints: `/health`, `/venues/{id}/calendar`."
+    ),
     version=__version__,
     docs_url=f"{settings.api_prefix}/docs",
     redoc_url=f"{settings.api_prefix}/redoc",
