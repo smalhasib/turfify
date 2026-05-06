@@ -112,6 +112,41 @@ export async function cancelHold(id: number): Promise<BookingStatusResponse> {
   return data;
 }
 
+export type CancelPreviewResponse = {
+  refund_amount_bdt: number;
+  eligible_slot_count: number;
+  total_slot_count: number;
+  full_refund_hours: number;
+  requires_reauth: boolean;
+  refund_will_be_required: boolean;
+};
+
+export async function previewCancellation(id: number): Promise<CancelPreviewResponse> {
+  const { data } = await getApiClient().get<CancelPreviewResponse>(
+    `/bookings/${id}/cancel-preview`,
+  );
+  return data;
+}
+
+export type CancelConfirmResponse = {
+  booking_id: number;
+  new_status: BookingStatus;
+  refund_amount_bdt: number;
+  refund_id: number | null;
+  refund_required: boolean;
+};
+
+export async function confirmCancellation(
+  id: number,
+  firebaseIdToken: string,
+): Promise<CancelConfirmResponse> {
+  const { data } = await getApiClient().post<CancelConfirmResponse>(
+    `/bookings/${id}/cancel`,
+    { firebase_id_token: firebaseIdToken },
+  );
+  return data;
+}
+
 export async function downloadReceipt(id: number, publicId: string): Promise<void> {
   const resp = await getApiClient().get<Blob>(`/bookings/${id}/receipt.pdf`, {
     responseType: "blob",

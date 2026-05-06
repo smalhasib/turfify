@@ -8,11 +8,14 @@ import { Header } from "@/components/ui/Header";
 import { useAuthHydrated, useAuthStore } from "@/lib/authStore";
 import {
   cancelHold,
+  confirmCancellation,
   downloadReceipt,
   fetchBookingStatus,
+  previewCancellation,
   type BookingStatus,
   type BookingStatusResponse,
 } from "@/lib/bookings";
+import { startPhoneAuth } from "@/lib/auth";
 import { formatLocalHour, formatPriceBdt } from "@/lib/calendar";
 
 const STATUS_COPY: Record<BookingStatus, { label: string; tone: "live" | "ok" | "ended" }> = {
@@ -102,6 +105,61 @@ export default function BookingStatusPage() {
       setSeconds(updated.seconds_to_expiry);
     } catch {
       // ignore — surface stale state
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCancelBooking() {
+    if (!booking) return;
+    setBusy(true);
+    try {
+      const preview = await previewCancellation(id);
+
+      const ok = window.confirm(
+        preview.refund_amount_bdt > 0
+          ? `Refund: ${preview.refund_amount_bdt.toLocaleString()} BDT (${preview.eligible_slot_count}/${preview.total_slot_count} slots eligible). Continue?`
+          : `No refund within ${preview.full_refund_hours}h of slot. Continue with cancellation?`,
+      );
+      if (!ok) {
+        setBusy(false);
+        return;
+      }
+
+      let idToken = "x".repeat(40); // dummy for unpaid path; verifier ignored
+      if (preview.requires_reauth) {
+        const phone = useAuthStore.getState().user?.phone;
+        if (!phone) {
+          window.alert("Sign in again before cancelling.");
+          setBusy(false);
+          return;
+        }
+        const conf = await startPhoneAuth(phone, "recaptcha-cancel-container");
+        const code = window.prompt("Enter the OTP sent to your phone:");
+        if (!code) {
+          setBusy(false);
+          return;
+        }
+        const credential = await conf.confirm(code);
+        idToken = await credential.user.getIdToken(true);
+      }
+
+      const res = await confirmCancellation(id, idToken);
+      // Refresh from server for the canonical state.
+      const updated = await fetchBookingStatus(id);
+      setBooking(updated);
+      setSeconds(updated.seconds_to_expiry);
+      window.alert(
+        res.refund_required
+          ? `Cancelled. Refund of BDT ${res.refund_amount_bdt} pending — staff will return cash at venue.`
+          : "Cancelled.",
+      );
+    } catch (err) {
+      window.alert(
+        err instanceof Error
+          ? `Cancel failed — ${err.message}`
+          : "Cancel failed.",
+      );
     } finally {
       setBusy(false);
     }
@@ -268,10 +326,21 @@ export default function BookingStatusPage() {
           >
             Download receipt
           </Button>
+          {booking.status === "confirmed" && (
+            <Button
+              variant="outline"
+              onClick={onCancelBooking}
+              loading={busy}
+              data-testid="cancel-booking"
+            >
+              Cancel booking
+            </Button>
+          )}
           <Button variant="ghost" onClick={() => router.push("/book")}>
             Back to calendar
           </Button>
         </div>
+        <div id="recaptcha-cancel-container" />
       </main>
     </>
   );

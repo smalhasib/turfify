@@ -16,11 +16,13 @@ from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import FirebaseVerifierDep
 from app.db import get_db
 from app.enums import BookingStatus, PaymentCollection, UserRole
-from app.models import Booking, BookingSlot
+from app.models import Booking, BookingSlot, Venue
 from app.redis_client import get_redis
 from app.security.deps import CurrentUser, StaffOrAdmin
+from app.security.firebase import FirebaseAuthError
 from app.services.bookings import (
     HoldError,
     HoldSlotInput,
@@ -29,6 +31,12 @@ from app.services.bookings import (
     mark_cash_paid,
     reconcile_expired_holds,
     reconcile_unpaid_cash_bookings,
+)
+from app.services.cancellation import (
+    BookingNotCancellableError,
+    CancellationError,
+    cancel_booking,
+    compute_refund,
 )
 from app.services.receipts import render_receipt_pdf
 
@@ -283,3 +291,152 @@ async def download_receipt(
         "Cache-Control": "private, max-age=300",
     }
     return Response(content=pdf, media_type="application/pdf", headers=headers)
+
+
+# ---------------------------------------------------------------------------
+# Cancellation
+# ---------------------------------------------------------------------------
+
+
+# Re-OTP freshness window: the customer must complete Firebase phone
+# re-verification within this many seconds of triggering cancel.
+REAUTH_MAX_AGE_SECONDS = 5 * 60
+
+
+class CancelPreviewResponse(BaseModel):
+    refund_amount_bdt: int
+    eligible_slot_count: int
+    total_slot_count: int
+    full_refund_hours: int
+    requires_reauth: bool
+    refund_will_be_required: bool
+
+
+class CancelConfirmRequest(BaseModel):
+    firebase_id_token: str = Field(..., min_length=20)
+
+
+class CancelConfirmResponse(BaseModel):
+    booking_id: int
+    new_status: BookingStatus
+    refund_amount_bdt: int
+    refund_id: int | None
+    refund_required: bool
+
+
+async def _venue_for(db: AsyncSession, venue_id: int) -> Venue:
+    venue = (await db.execute(select(Venue).where(Venue.id == venue_id))).scalar_one_or_none()
+    if venue is None:  # pragma: no cover - FK should make this impossible
+        raise HTTPException(status_code=404, detail="venue_not_found")
+    return venue
+
+
+@router.get(
+    "/{booking_id}/cancel-preview",
+    response_model=CancelPreviewResponse,
+)
+async def preview_cancellation(
+    booking_id: int, user: CurrentUser, db: DbDep
+) -> CancelPreviewResponse:
+    """Show the refund the customer would get if they cancel right now.
+
+    Used by the UI before triggering the re-OTP flow so the user can decide
+    informed. Always available to the booking owner; admins/staff also.
+    """
+    booking = await _load_booking_for_user(db, booking_id=booking_id, user=user)
+    if booking.status not in (BookingStatus.PENDING_PAYMENT, BookingStatus.CONFIRMED):
+        raise HTTPException(status_code=409, detail="booking_not_cancellable")
+
+    venue = await _venue_for(db, booking.venue_id)
+    slot_rows = (
+        (await db.execute(select(BookingSlot).where(BookingSlot.booking_id == booking.id)))
+        .scalars()
+        .all()
+    )
+    preview = compute_refund(
+        booking=booking,
+        slot_rows=slot_rows,
+        full_refund_hours=venue.cancellation_full_refund_hours,
+    )
+
+    # A customer cancelling a confirmed booking that they paid for in cash
+    # needs to step through the re-OTP gate. Pending bookings (no payment
+    # yet) skip it — there's no money at risk.
+    has_paid_cash = booking.payment_collection == PaymentCollection.CASH
+    requires_reauth = (
+        user.role == UserRole.CUSTOMER
+        and booking.status == BookingStatus.CONFIRMED
+        and has_paid_cash
+        and preview.refund_amount_bdt > 0
+    )
+
+    return CancelPreviewResponse(
+        refund_amount_bdt=preview.refund_amount_bdt,
+        eligible_slot_count=preview.eligible_slot_count,
+        total_slot_count=preview.total_slot_count,
+        full_refund_hours=preview.full_refund_hours,
+        requires_reauth=requires_reauth,
+        refund_will_be_required=requires_reauth,
+    )
+
+
+@router.post(
+    "/{booking_id}/cancel",
+    response_model=CancelConfirmResponse,
+)
+async def confirm_cancellation(
+    booking_id: int,
+    body: CancelConfirmRequest | None,
+    user: CurrentUser,
+    verifier: FirebaseVerifierDep,
+    db: DbDep,
+) -> CancelConfirmResponse:
+    """Confirm cancellation. Re-OTP is required only when the customer is
+    cancelling a paid confirmed booking; the UI gates this via the preview.
+    """
+    booking = await _load_booking_for_user(db, booking_id=booking_id, user=user)
+    venue = await _venue_for(db, booking.venue_id)
+
+    is_admin = user.role in (UserRole.ADMIN, UserRole.STAFF)
+    needs_reauth = (
+        not is_admin
+        and booking.status == BookingStatus.CONFIRMED
+        and booking.payment_collection == PaymentCollection.CASH
+    )
+
+    if needs_reauth:
+        if body is None or not body.firebase_id_token:
+            raise HTTPException(status_code=401, detail="reauth_required")
+        try:
+            decoded = verifier(body.firebase_id_token)
+        except FirebaseAuthError as e:
+            raise HTTPException(status_code=401, detail=f"firebase_{e}") from e
+
+        # Token must be issued for the same phone and within the freshness window.
+        if decoded.get("phone_number") != user.phone:
+            raise HTTPException(status_code=401, detail="reauth_phone_mismatch")
+        iat = decoded.get("iat") or decoded.get("auth_time") or 0
+        age = datetime.now(UTC).timestamp() - float(iat)
+        if age > REAUTH_MAX_AGE_SECONDS:
+            raise HTTPException(status_code=401, detail="reauth_stale")
+
+    try:
+        result = await cancel_booking(
+            db,
+            booking=booking,
+            user=user,
+            venue_full_refund_hours=venue.cancellation_full_refund_hours,
+            initiator="admin" if is_admin else "customer",
+        )
+    except BookingNotCancellableError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.code) from e
+    except CancellationError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.code) from e
+
+    return CancelConfirmResponse(
+        booking_id=result.booking_id,
+        new_status=result.new_status,
+        refund_amount_bdt=booking.refund_amount_bdt,
+        refund_id=result.refund_id,
+        refund_required=result.refund_required,
+    )
