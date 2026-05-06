@@ -5,6 +5,7 @@ import { getApiClient } from "@/lib/api";
 export type HoldRequest = {
   venue_id: number;
   slots: { start_at: string }[];
+  discount_code?: string | null;
 };
 
 export type HoldResponse = {
@@ -12,9 +13,35 @@ export type HoldResponse = {
   public_id: string;
   hold_token: string;
   hold_expires_at: string;
+  subtotal_bdt: number;
+  discount_code: string | null;
+  discount_amount_bdt: number;
   total_bdt: number;
   slot_count: number;
 };
+
+export type DiscountValidateRequest = {
+  code: string;
+  subtotal_bdt: number;
+  slot_dates: string[];
+};
+
+export type DiscountValidateResponse = {
+  code: string;
+  type: "percent" | "flat";
+  amount_off_bdt: number;
+  final_total_bdt: number;
+};
+
+export async function validateDiscountCode(
+  payload: DiscountValidateRequest,
+): Promise<DiscountValidateResponse> {
+  const { data } = await getApiClient().post<DiscountValidateResponse>(
+    "/discount-codes/validate",
+    payload,
+  );
+  return data;
+}
 
 export type BookingStatus =
   | "pending_payment"

@@ -10,6 +10,12 @@ from app import __version__
 from app.api.auth import router as auth_router
 from app.api.bookings import router as bookings_router
 from app.api.calendar import router as calendar_router
+from app.api.discounts import (
+    admin_router as admin_discounts_router,
+)
+from app.api.discounts import (
+    router as discounts_router,
+)
 from app.api.health import router as health_router
 from app.api.me import router as me_router
 from app.config import get_settings
@@ -52,6 +58,8 @@ app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(me_router, prefix=settings.api_prefix)
 app.include_router(calendar_router, prefix=settings.api_prefix)
 app.include_router(bookings_router, prefix=settings.api_prefix)
+app.include_router(discounts_router, prefix=settings.api_prefix)
+app.include_router(admin_discounts_router, prefix=settings.api_prefix)
 
 
 @app.get("/", include_in_schema=False)

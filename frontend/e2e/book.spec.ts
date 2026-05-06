@@ -154,6 +154,137 @@ test.describe("Phase 4 cart + hold", () => {
     await page.waitForURL("**/login", { timeout: 10_000 });
   });
 
+  test("apply discount code shows reduced total + persists into hold call", async ({ page }) => {
+    await page.addInitScript(() => {
+      const value = {
+        state: {
+          accessToken: "stub-access-token",
+          refreshToken: "stub-refresh-token",
+          user: { id: 99, phone: "+8801712345678", name: null, email: null, role: "customer" },
+        },
+        version: 0,
+      };
+      window.localStorage.setItem("turfify-auth", JSON.stringify(value));
+    });
+
+    let lastHoldBody: unknown = null;
+
+    await page.route("**/v1/discount-codes/validate", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "OFF20",
+          type: "percent",
+          amount_off_bdt: 200,
+          final_total_bdt: 800,
+        }),
+      });
+    });
+
+    await page.route("**/v1/bookings/hold", async (route) => {
+      lastHoldBody = JSON.parse(route.request().postData() ?? "{}");
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          booking_id: 51,
+          public_id: "TRF-2026-000051",
+          hold_token: "abc",
+          hold_expires_at: new Date(Date.now() + 8 * 60 * 1000).toISOString(),
+          subtotal_bdt: 1000,
+          discount_code: "OFF20",
+          discount_amount_bdt: 200,
+          total_bdt: 800,
+          slot_count: 1,
+        }),
+      });
+    });
+
+    await page.route("**/v1/bookings/51/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          booking_id: 51,
+          public_id: "TRF-2026-000051",
+          status: "pending_payment",
+          venue_id: 1,
+          total_bdt: 800,
+          subtotal_bdt: 1000,
+          discount_amount_bdt: 200,
+          admin_adjustment_bdt: 0,
+          slot_count: 1,
+          first_slot_at: "2026-05-12T10:00:00Z",
+          last_slot_at: "2026-05-12T11:00:00Z",
+          hold_expires_at: new Date(Date.now() + 8 * 60 * 1000).toISOString(),
+          seconds_to_expiry: 480,
+          slots: [
+            { slot_start_at: "2026-05-12T10:00:00Z", slot_end_at: "2026-05-12T11:00:00Z", price_bdt: 1000 },
+          ],
+          created_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await page.goto("/book");
+    const open = page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("OPEN", { exact: true }) })
+      .first();
+    await open.click();
+
+    await page.getByTestId("discount-input").fill("off20");
+    await page.getByTestId("discount-apply").click();
+
+    await expect(page.getByTestId("discount-applied")).toBeVisible();
+    await expect(page.getByTestId("cart-discount")).toContainText("BDT 200");
+    await expect(page.getByTestId("cart-total")).toHaveText("BDT 800");
+
+    await page.getByTestId("cart-continue").click();
+    await page.waitForURL("**/booking/51", { timeout: 10_000 });
+
+    type HoldBody = { discount_code?: string };
+    expect((lastHoldBody as HoldBody).discount_code).toBe("OFF20");
+    await expect(page.getByTestId("booking-discount-line")).toBeVisible();
+    await expect(page.getByTestId("booking-total")).toHaveText("BDT 800");
+  });
+
+  test("invalid discount code shows inline error + total stays at subtotal", async ({ page }) => {
+    await page.addInitScript(() => {
+      const value = {
+        state: {
+          accessToken: "stub-access-token",
+          refreshToken: "stub-refresh-token",
+          user: { id: 99, phone: "+8801712345678", name: null, email: null, role: "customer" },
+        },
+        version: 0,
+      };
+      window.localStorage.setItem("turfify-auth", JSON.stringify(value));
+    });
+
+    await page.route("**/v1/discount-codes/validate", async (route) => {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "discount_not_found" }),
+      });
+    });
+
+    await page.goto("/book");
+    const open = page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("OPEN", { exact: true }) })
+      .first();
+    await open.click();
+
+    await page.getByTestId("discount-input").fill("nope");
+    await page.getByTestId("discount-apply").click();
+
+    await expect(page.getByTestId("discount-error")).toBeVisible();
+    await expect(page.getByTestId("cart-total")).toHaveText("BDT 1,000");
+  });
+
   test("Continue posts hold and redirects to /booking/{id}", async ({ page }) => {
     // Pre-authenticate by seeding the persisted auth store.
     await page.addInitScript(() => {

@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from redis.asyncio import Redis
 from sqlalchemy import and_, func, or_, select
@@ -38,6 +39,18 @@ from app.models import (
     SlotOverride,
     User,
     Venue,
+)
+from app.services.discounts import (
+    DiscountInvalidError,
+)
+from app.services.discounts import (
+    redeem as redeem_discount,
+)
+from app.services.discounts import (
+    validate_code as validate_discount_code,
+)
+from app.services.discounts import (
+    void_for_booking as void_discount_for_booking,
 )
 from app.services.locks import (
     SlotLockConflictError,
@@ -88,6 +101,13 @@ class SlotLockConflictHoldError(HoldError):
     status_code = 409
 
 
+class DiscountRejectedError(HoldError):
+    """Wraps DiscountInvalidError so the hold flow can return a uniform 400."""
+
+    code = "discount_rejected"
+    status_code = 400
+
+
 # ---------------------------------------------------------------------------
 # Inputs / outputs
 # ---------------------------------------------------------------------------
@@ -106,6 +126,9 @@ class HoldResult:
     public_id: str
     hold_token: str
     hold_expires_at: datetime
+    subtotal_bdt: int
+    discount_code: str | None
+    discount_amount_bdt: int
     total_bdt: int
     slot_count: int
 
@@ -127,6 +150,7 @@ async def hold_slots(
     user: User,
     venue_id: int,
     slot_inputs: Sequence[HoldSlotInput],
+    discount_code: str | None = None,
     now: datetime | None = None,
 ) -> HoldResult:
     """Lock + persist a multi-slot hold for `user`.
@@ -151,8 +175,6 @@ async def hold_slots(
         raise HoldError("slot_starts_must_be_timezone_aware")
 
     # Group by venue-local date so we generate the day grid once per date.
-    from zoneinfo import ZoneInfo
-
     venue_tz = ZoneInfo(venue.timezone)
     dates_needed = sorted({s.astimezone(venue_tz).date() for s in slot_starts})
 
@@ -272,6 +294,33 @@ async def hold_slots(
         first_start, _, _ = matched[0]
         _, last_end, _ = matched[-1]
 
+        # Resolve discount BEFORE booking insert so we fail fast on a bad code
+        # without polluting Postgres with a doomed-to-rollback row.
+        discount_resolution = None
+        discount_code_id: int | None = None
+        discount_amount_bdt = 0
+        if discount_code:
+            try:
+                slot_dates = [s.astimezone(ZoneInfo(venue.timezone)).date() for s, _, _ in matched]
+                discount_resolution = await validate_discount_code(
+                    db,
+                    code=discount_code,
+                    user=user,
+                    subtotal_bdt=subtotal,
+                    slot_dates=slot_dates,
+                    now=now,
+                )
+                discount_code_id = discount_resolution.discount.id
+                discount_amount_bdt = discount_resolution.amount_off_bdt
+            except DiscountInvalidError as exc:
+                # Roll the lock back before raising so the user can retry.
+                await release_slot_locks(
+                    redis, venue_id=venue_id, slot_starts=starts, hold_token=hold_token
+                )
+                raise DiscountRejectedError(exc.code) from exc
+
+        total_bdt = max(0, subtotal - discount_amount_bdt)
+
         booking = Booking(
             public_id="TRF-PENDING",  # placeholder; rewritten after id is known
             user_id=user.id,
@@ -279,7 +328,9 @@ async def hold_slots(
             booking_source=BookingSource.WEB,
             payment_collection=PaymentCollection.ONLINE,
             subtotal_bdt=subtotal,
-            total_amount_bdt=subtotal,
+            discount_code_id=discount_code_id,
+            discount_amount_bdt=discount_amount_bdt,
+            total_amount_bdt=total_bdt,
             slot_count=len(matched),
             first_slot_at=first_start,
             last_slot_at=last_end,
@@ -302,6 +353,15 @@ async def hold_slots(
                     price_bdt=price,
                     booking_status=BookingStatus.PENDING_PAYMENT,
                 )
+            )
+
+        if discount_resolution is not None:
+            await redeem_discount(
+                db,
+                discount=discount_resolution.discount,
+                booking_id=booking.id,
+                user=user,
+                amount_off_bdt=discount_amount_bdt,
             )
 
         await db.commit()
@@ -328,7 +388,10 @@ async def hold_slots(
         user_id=user.id,
         venue_id=venue_id,
         slot_count=len(matched),
-        total_bdt=subtotal,
+        subtotal_bdt=subtotal,
+        discount_code=discount_code,
+        discount_amount_bdt=discount_amount_bdt,
+        total_bdt=total_bdt,
         ttl_seconds=ttl,
     )
 
@@ -339,7 +402,10 @@ async def hold_slots(
         public_id=booking.public_id,
         hold_token=hold_token,
         hold_expires_at=expires,
-        total_bdt=subtotal,
+        subtotal_bdt=subtotal,
+        discount_code=discount_code,
+        discount_amount_bdt=discount_amount_bdt,
+        total_bdt=total_bdt,
         slot_count=len(matched),
     )
 
@@ -376,6 +442,11 @@ async def expire_hold(
             slot_starts=slots,
             hold_token=booking.hold_token,
         )
+
+    # Void any redemptions tied to this booking so the user can retry the
+    # code without burning a usage count.
+    await void_discount_for_booking(db, booking_id=booking.id)
+
     await db.commit()
     logger.info(
         "booking.hold.expired",

@@ -199,14 +199,33 @@ export default function BookingStatusPage() {
               </li>
             ))}
           </ul>
-          <div className="flex items-baseline justify-between border-t border-rule pt-2xs">
-            <span className="label-caps text-ink-soft">Total</span>
-            <span
-              className="stadium-display text-3xl uppercase text-ink"
-              data-testid="booking-total"
-            >
-              {formatPriceBdt(booking.total_bdt)}
-            </span>
+          <div className="flex flex-col gap-3xs border-t border-rule pt-2xs">
+            <div className="flex items-baseline justify-between text-sm">
+              <span className="text-ink-soft">Subtotal</span>
+              <span className="font-medium text-ink">
+                {formatPriceBdt(booking.subtotal_bdt)}
+              </span>
+            </div>
+            {booking.discount_amount_bdt > 0 && (
+              <div
+                className="flex items-baseline justify-between text-sm"
+                data-testid="booking-discount-line"
+              >
+                <span className="text-ink-soft">Discount</span>
+                <span className="font-medium text-success">
+                  − {formatPriceBdt(booking.discount_amount_bdt)}
+                </span>
+              </div>
+            )}
+            <div className="flex items-baseline justify-between">
+              <span className="label-caps text-ink-soft">Total</span>
+              <span
+                className="stadium-display text-3xl uppercase text-ink"
+                data-testid="booking-total"
+              >
+                {formatPriceBdt(booking.total_bdt)}
+              </span>
+            </div>
           </div>
         </section>
 

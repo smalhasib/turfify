@@ -49,6 +49,7 @@ class HoldSlotIn(BaseModel):
 class HoldRequest(BaseModel):
     venue_id: int
     slots: list[HoldSlotIn] = Field(..., min_length=1, max_length=MAX_SLOTS_PER_HOLD)
+    discount_code: str | None = Field(default=None, max_length=64)
 
 
 class HoldResponse(BaseModel):
@@ -56,6 +57,9 @@ class HoldResponse(BaseModel):
     public_id: str
     hold_token: str
     hold_expires_at: datetime
+    subtotal_bdt: int
+    discount_code: str | None
+    discount_amount_bdt: int
     total_bdt: int
     slot_count: int
 
@@ -162,7 +166,14 @@ async def create_hold(
 
     inputs = [HoldSlotInput(start_at=s.start_at) for s in body.slots]
     try:
-        result = await hold_slots(db, redis, user=user, venue_id=body.venue_id, slot_inputs=inputs)
+        result = await hold_slots(
+            db,
+            redis,
+            user=user,
+            venue_id=body.venue_id,
+            slot_inputs=inputs,
+            discount_code=body.discount_code,
+        )
     except HoldError as e:
         raise HTTPException(status_code=e.status_code, detail=str(e)) from e
 
@@ -171,6 +182,9 @@ async def create_hold(
         public_id=result.public_id,
         hold_token=result.hold_token,
         hold_expires_at=result.hold_expires_at,
+        subtotal_bdt=result.subtotal_bdt,
+        discount_code=result.discount_code,
+        discount_amount_bdt=result.discount_amount_bdt,
         total_bdt=result.total_bdt,
         slot_count=result.slot_count,
     )
