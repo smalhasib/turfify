@@ -2,18 +2,33 @@
 
 import { useEffect, useState } from "react";
 
+import { CartPanel } from "@/components/calendar/CartPanel";
 import { DayPicker } from "@/components/calendar/DayPicker";
 import { SlotCell } from "@/components/calendar/SlotCell";
 import { Header } from "@/components/ui/Header";
 import {
   addDaysIso,
   fetchCalendar,
+  formatLocalHour,
   todayIso,
   type CalendarResponse,
+  type CalendarSlot,
 } from "@/lib/calendar";
+import { useCartStore } from "@/lib/cartStore";
 
-const VENUE_ID = 1; // single-venue MVP
+const VENUE_ID = 1;
 const WINDOW_DAYS = 7;
+
+function slotLabel(slot: CalendarSlot, timezone: string): string {
+  const time = formatLocalHour(slot.start_at, timezone);
+  const date = new Date(slot.start_at).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: timezone,
+  });
+  return `${date} · ${time}`;
+}
 
 export default function BookPage() {
   const [start] = useState(() => todayIso());
@@ -21,6 +36,8 @@ export default function BookPage() {
   const [calendar, setCalendar] = useState<CalendarResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const cartSlots = useCartStore((s) => s.slots);
+  const toggle = useCartStore((s) => s.toggle);
 
   useEffect(() => {
     const end = addDaysIso(start, WINDOW_DAYS - 1);
@@ -48,6 +65,8 @@ export default function BookPage() {
   }, [start]);
 
   const day = calendar?.days.find((d) => d.date === selectedDate);
+  const tz = calendar?.timezone ?? "Asia/Dhaka";
+  const cartStarts = new Set(cartSlots.map((s) => s.startAt));
 
   return (
     <>
@@ -86,37 +105,60 @@ export default function BookPage() {
           <p className="text-sm text-ink-mute">Loading slots…</p>
         )}
 
-        {day?.is_closed && (
-          <div
-            className="rounded-md border border-rule bg-surface px-md py-lg text-center"
-            data-testid="day-closed"
-          >
-            <p className="stadium-display text-3xl uppercase text-ink">Closed</p>
-            <p className="mt-2xs text-sm text-ink-soft">
-              No slots scheduled for this day.
+        <div className="grid gap-md lg:grid-cols-[3fr_1fr]">
+          <div className="flex flex-col gap-md">
+            {day?.is_closed && (
+              <div
+                className="rounded-md border border-rule bg-surface px-md py-lg text-center"
+                data-testid="day-closed"
+              >
+                <p className="stadium-display text-3xl uppercase text-ink">Closed</p>
+                <p className="mt-2xs text-sm text-ink-soft">
+                  No slots scheduled for this day.
+                </p>
+              </div>
+            )}
+
+            {day && !day.is_closed && (
+              <section
+                className="grid gap-2xs sm:grid-cols-2 lg:grid-cols-3"
+                data-testid="slot-grid"
+              >
+                {day.slots.map((slot) => {
+                  const isSelected = cartStarts.has(slot.start_at);
+                  return (
+                    <SlotCell
+                      key={slot.start_at}
+                      slot={slot}
+                      timezone={tz}
+                      venueId={VENUE_ID}
+                      selected={isSelected}
+                      onToggle={() =>
+                        toggle(VENUE_ID, {
+                          startAt: slot.start_at,
+                          endAt: slot.end_at,
+                          priceBdt: slot.price_bdt,
+                          label: slotLabel(slot, tz),
+                        })
+                      }
+                    />
+                  );
+                })}
+              </section>
+            )}
+
+            <p className="pt-2xs text-xs text-ink-mute">
+              Tap a slot to add it to the cart. Hold reserves slots for 8 minutes
+              while you sign in / pay.
             </p>
           </div>
-        )}
 
-        {day && !day.is_closed && (
-          <section
-            className="grid gap-2xs sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-            data-testid="slot-grid"
-          >
-            {day.slots.map((slot) => (
-              <SlotCell
-                key={slot.start_at}
-                slot={slot}
-                timezone={calendar?.timezone ?? "Asia/Dhaka"}
-              />
-            ))}
-          </section>
-        )}
-
-        <p className="pt-md text-xs text-ink-mute">
-          Tap a slot to add it to the cart. Locks open in Phase 4.
-        </p>
+          <div className="lg:sticky lg:top-20 lg:self-start">
+            <CartPanel />
+          </div>
+        </div>
       </main>
     </>
   );
 }
+

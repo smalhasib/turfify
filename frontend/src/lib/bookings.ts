@@ -1,0 +1,73 @@
+"use client";
+
+import { getApiClient } from "@/lib/api";
+
+export type HoldRequest = {
+  venue_id: number;
+  slots: { start_at: string }[];
+};
+
+export type HoldResponse = {
+  booking_id: number;
+  public_id: string;
+  hold_token: string;
+  hold_expires_at: string;
+  total_bdt: number;
+  slot_count: number;
+};
+
+export type BookingStatus =
+  | "pending_payment"
+  | "confirmed"
+  | "expired"
+  | "failed"
+  | "cancelled"
+  | "auto_cancelled_no_payment"
+  | "payment_received_no_slot"
+  | "refund_pending"
+  | "refunded"
+  | "refund_failed"
+  | "completed";
+
+export type BookingSlotOut = {
+  slot_start_at: string;
+  slot_end_at: string;
+  price_bdt: number;
+};
+
+export type BookingStatusResponse = {
+  booking_id: number;
+  public_id: string;
+  status: BookingStatus;
+  venue_id: number;
+  total_bdt: number;
+  subtotal_bdt: number;
+  discount_amount_bdt: number;
+  admin_adjustment_bdt: number;
+  slot_count: number;
+  first_slot_at: string;
+  last_slot_at: string;
+  hold_expires_at: string | null;
+  seconds_to_expiry: number | null;
+  slots: BookingSlotOut[];
+  created_at: string;
+};
+
+export async function createHold(payload: HoldRequest): Promise<HoldResponse> {
+  const { data } = await getApiClient().post<HoldResponse>("/bookings/hold", payload);
+  return data;
+}
+
+export async function fetchBookingStatus(id: number): Promise<BookingStatusResponse> {
+  const { data } = await getApiClient().get<BookingStatusResponse>(
+    `/bookings/${id}/status`,
+  );
+  return data;
+}
+
+export async function cancelHold(id: number): Promise<BookingStatusResponse> {
+  const { data } = await getApiClient().post<BookingStatusResponse>(
+    `/bookings/${id}/cancel-hold`,
+  );
+  return data;
+}

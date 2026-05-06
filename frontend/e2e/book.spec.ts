@@ -94,3 +94,132 @@ test.describe("Phase 3 booking calendar", () => {
     await expect(blocked).toBeDisabled();
   });
 });
+
+test.describe("Phase 4 cart + hold", () => {
+  test.beforeEach(async ({ page }) => {
+    await stubCalendar(page);
+  });
+
+  test("clicking an open slot adds it to the cart with running total", async ({ page }) => {
+    await page.goto("/book");
+
+    // Cart starts empty.
+    await expect(page.getByTestId("cart-empty")).toBeVisible();
+
+    // First OPEN slot is 16:00 (BDT 1,000). 17:00 booked, 18:00 blocked,
+    // 19:00 next OPEN at BDT 1,500.
+    const open = page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("OPEN", { exact: true }) })
+      .first();
+    await open.click();
+
+    await expect(page.getByTestId("cart-panel")).toBeVisible();
+    await expect(page.getByTestId("cart-total")).toHaveText("BDT 1,000");
+
+    // Tap a second OPEN slot (19:00 = 1500 BDT).
+    const second = page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("OPEN", { exact: true }) })
+      .nth(1);
+    await second.click();
+    await expect(page.getByTestId("cart-total")).toHaveText("BDT 2,500");
+
+    // PICKED label appears on the chosen slot.
+    await expect(
+      page
+        .getByTestId("slot-cell")
+        .filter({ has: page.getByText("PICKED", { exact: true }) })
+        .first(),
+    ).toBeVisible();
+
+    // Tap the first PICKED again to remove it (only the 19:00 one stays).
+    await page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("PICKED", { exact: true }) })
+      .first()
+      .click();
+    await expect(page.getByTestId("cart-total")).toHaveText("BDT 1,500");
+  });
+
+  test("Continue redirects unauthenticated users to /login", async ({ page }) => {
+    await page.goto("/book");
+    const open = page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("OPEN", { exact: true }) })
+      .first();
+    await open.click();
+
+    await page.getByTestId("cart-continue").click();
+    await page.waitForURL("**/login", { timeout: 10_000 });
+  });
+
+  test("Continue posts hold and redirects to /booking/{id}", async ({ page }) => {
+    // Pre-authenticate by seeding the persisted auth store.
+    await page.addInitScript(() => {
+      const value = {
+        state: {
+          accessToken: "stub-access-token",
+          refreshToken: "stub-refresh-token",
+          user: { id: 99, phone: "+8801712345678", name: null, email: null, role: "customer" },
+        },
+        version: 0,
+      };
+      window.localStorage.setItem("turfify-auth", JSON.stringify(value));
+    });
+
+    await page.route("**/v1/bookings/hold", async (route) => {
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({
+          booking_id: 42,
+          public_id: "TRF-2026-000042",
+          hold_token: "abc",
+          hold_expires_at: new Date(Date.now() + 8 * 60 * 1000).toISOString(),
+          total_bdt: 1000,
+          slot_count: 1,
+        }),
+      });
+    });
+
+    await page.route("**/v1/bookings/42/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          booking_id: 42,
+          public_id: "TRF-2026-000042",
+          status: "pending_payment",
+          venue_id: 1,
+          total_bdt: 1000,
+          subtotal_bdt: 1000,
+          discount_amount_bdt: 0,
+          admin_adjustment_bdt: 0,
+          slot_count: 1,
+          first_slot_at: "2026-05-12T10:00:00Z",
+          last_slot_at: "2026-05-12T11:00:00Z",
+          hold_expires_at: new Date(Date.now() + 8 * 60 * 1000).toISOString(),
+          seconds_to_expiry: 480,
+          slots: [
+            { slot_start_at: "2026-05-12T10:00:00Z", slot_end_at: "2026-05-12T11:00:00Z", price_bdt: 1000 },
+          ],
+          created_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await page.goto("/book");
+    const open = page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("OPEN", { exact: true }) })
+      .first();
+    await open.click();
+    await page.getByTestId("cart-continue").click();
+
+    await page.waitForURL("**/booking/42", { timeout: 10_000 });
+    await expect(page.getByTestId("booking-public-id")).toHaveText("TRF-2026-000042");
+    await expect(page.getByTestId("hold-countdown")).toBeVisible();
+    await expect(page.getByTestId("booking-total")).toHaveText("BDT 1,000");
+  });
+});
