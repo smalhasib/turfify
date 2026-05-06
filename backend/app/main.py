@@ -19,6 +19,7 @@ from app.api.discounts import (
 )
 from app.api.health import router as health_router
 from app.api.me import router as me_router
+from app.api.reports import router as reports_router
 from app.config import get_settings
 from app.logging_config import configure_logging, get_logger
 from app.redis_client import close_redis
@@ -62,6 +63,7 @@ app.include_router(bookings_router, prefix=settings.api_prefix)
 app.include_router(discounts_router, prefix=settings.api_prefix)
 app.include_router(admin_discounts_router, prefix=settings.api_prefix)
 app.include_router(admin_router, prefix=settings.api_prefix)
+app.include_router(reports_router, prefix=settings.api_prefix)
 
 
 @app.get("/", include_in_schema=False)
