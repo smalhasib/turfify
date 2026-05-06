@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { HealthBadge } from "@/components/HealthBadge";
 
 export default function HomePage() {
@@ -13,7 +15,13 @@ export default function HomePage() {
         <HealthBadge />
       </div>
 
-      <p className="text-xs text-neutral-400">Phase 0 — Bootstrap</p>
+      <Link
+        href="/login"
+        className="rounded bg-brand-600 px-6 py-2 font-medium text-white hover:bg-brand-700"
+        data-testid="cta-signin"
+      >
+        Sign in
+      </Link>
     </main>
   );
 }

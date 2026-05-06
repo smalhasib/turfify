@@ -7,7 +7,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
+from app.api.auth import router as auth_router
 from app.api.health import router as health_router
+from app.api.me import router as me_router
 from app.config import get_settings
 from app.logging_config import configure_logging, get_logger
 from app.redis_client import close_redis
@@ -44,6 +46,8 @@ app.add_middleware(
 )
 
 app.include_router(health_router, prefix=settings.api_prefix)
+app.include_router(auth_router, prefix=settings.api_prefix)
+app.include_router(me_router, prefix=settings.api_prefix)
 
 
 @app.get("/", include_in_schema=False)

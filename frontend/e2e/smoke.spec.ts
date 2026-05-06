@@ -4,7 +4,7 @@ test.describe("Phase 0 smoke", () => {
   test("home page renders Turfify heading", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Turfify" })).toBeVisible();
-    await expect(page.getByText("Phase 0 — Bootstrap")).toBeVisible();
+    await expect(page.getByTestId("cta-signin")).toBeVisible();
   });
 
   test("health badge shows backend status", async ({ page }) => {
