@@ -285,8 +285,7 @@ test.describe("Phase 4 cart + hold", () => {
     await expect(page.getByTestId("cart-total")).toHaveText("BDT 1,000");
   });
 
-  test("Continue posts hold and redirects to /booking/{id}", async ({ page }) => {
-    // Pre-authenticate by seeding the persisted auth store.
+  test("Cash booking creates confirmed booking + shows awaiting-payment banner", async ({ page }) => {
     await page.addInitScript(() => {
       const value = {
         state: {
@@ -299,15 +298,21 @@ test.describe("Phase 4 cart + hold", () => {
       window.localStorage.setItem("turfify-auth", JSON.stringify(value));
     });
 
+    let lastHoldBody: unknown = null;
     await page.route("**/v1/bookings/hold", async (route) => {
+      lastHoldBody = JSON.parse(route.request().postData() ?? "{}");
       await route.fulfill({
         status: 201,
         contentType: "application/json",
         body: JSON.stringify({
           booking_id: 42,
           public_id: "TRF-2026-000042",
-          hold_token: "abc",
-          hold_expires_at: new Date(Date.now() + 8 * 60 * 1000).toISOString(),
+          payment_method: "cash",
+          hold_token: null,
+          hold_expires_at: null,
+          subtotal_bdt: 1000,
+          discount_code: null,
+          discount_amount_bdt: 0,
           total_bdt: 1000,
           slot_count: 1,
         }),
@@ -321,7 +326,8 @@ test.describe("Phase 4 cart + hold", () => {
         body: JSON.stringify({
           booking_id: 42,
           public_id: "TRF-2026-000042",
-          status: "pending_payment",
+          status: "confirmed",
+          payment_collection: "cash_pending",
           venue_id: 1,
           total_bdt: 1000,
           subtotal_bdt: 1000,
@@ -330,8 +336,8 @@ test.describe("Phase 4 cart + hold", () => {
           slot_count: 1,
           first_slot_at: "2026-05-12T10:00:00Z",
           last_slot_at: "2026-05-12T11:00:00Z",
-          hold_expires_at: new Date(Date.now() + 8 * 60 * 1000).toISOString(),
-          seconds_to_expiry: 480,
+          hold_expires_at: null,
+          seconds_to_expiry: null,
           slots: [
             { slot_start_at: "2026-05-12T10:00:00Z", slot_end_at: "2026-05-12T11:00:00Z", price_bdt: 1000 },
           ],
@@ -346,11 +352,43 @@ test.describe("Phase 4 cart + hold", () => {
       .filter({ has: page.getByText("OPEN", { exact: true }) })
       .first();
     await open.click();
+
+    // Cash is the default — verify the picker reflects that.
+    await expect(page.getByTestId("pay-cash")).toHaveAttribute("data-selected", "true");
+
     await page.getByTestId("cart-continue").click();
 
+    type HoldBody = { payment_method?: string };
     await page.waitForURL("**/booking/42", { timeout: 10_000 });
+    expect((lastHoldBody as HoldBody).payment_method).toBe("cash");
+
     await expect(page.getByTestId("booking-public-id")).toHaveText("TRF-2026-000042");
-    await expect(page.getByTestId("hold-countdown")).toBeVisible();
+    await expect(page.getByTestId("cash-awaiting")).toBeVisible();
+    await expect(page.getByTestId("hold-countdown")).not.toBeVisible();
     await expect(page.getByTestId("booking-total")).toHaveText("BDT 1,000");
+  });
+
+  test("bKash option is disabled for now", async ({ page }) => {
+    await page.addInitScript(() => {
+      const value = {
+        state: {
+          accessToken: "stub-access-token",
+          refreshToken: "stub-refresh-token",
+          user: { id: 99, phone: "+8801712345678", name: null, email: null, role: "customer" },
+        },
+        version: 0,
+      };
+      window.localStorage.setItem("turfify-auth", JSON.stringify(value));
+    });
+
+    await page.goto("/book");
+    const open = page
+      .getByTestId("slot-cell")
+      .filter({ has: page.getByText("OPEN", { exact: true }) })
+      .first();
+    await open.click();
+
+    await expect(page.getByTestId("pay-online")).toBeDisabled();
+    await expect(page.getByTestId("pay-cash")).toHaveAttribute("data-selected", "true");
   });
 });

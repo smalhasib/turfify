@@ -2,17 +2,29 @@
 
 import { getApiClient } from "@/lib/api";
 
+export type PaymentMethod = "online" | "cash";
+
+export type PaymentCollection =
+  | "online"
+  | "cash"
+  | "bkash_manual"
+  | "free"
+  | "pending_offline"
+  | "cash_pending";
+
 export type HoldRequest = {
   venue_id: number;
   slots: { start_at: string }[];
   discount_code?: string | null;
+  payment_method?: PaymentMethod;
 };
 
 export type HoldResponse = {
   booking_id: number;
   public_id: string;
-  hold_token: string;
-  hold_expires_at: string;
+  payment_method: PaymentMethod;
+  hold_token: string | null;
+  hold_expires_at: string | null;
   subtotal_bdt: number;
   discount_code: string | null;
   discount_amount_bdt: number;
@@ -66,6 +78,7 @@ export type BookingStatusResponse = {
   booking_id: number;
   public_id: string;
   status: BookingStatus;
+  payment_collection: PaymentCollection;
   venue_id: number;
   total_bdt: number;
   subtotal_bdt: number;

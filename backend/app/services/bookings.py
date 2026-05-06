@@ -29,11 +29,18 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.enums import BookingSource, BookingStatus, PaymentCollection
+from app.enums import (
+    BookingSource,
+    BookingStatus,
+    PaymentCollection,
+    PaymentProvider,
+    PaymentStatus,
+)
 from app.logging_config import get_logger
 from app.models import (
     Booking,
     BookingSlot,
+    Payment,
     PricingRule,
     ScheduleException,
     SlotOverride,
@@ -108,6 +115,25 @@ class DiscountRejectedError(HoldError):
     status_code = 400
 
 
+class CashDisabledError(HoldError):
+    """Customer is blacklisted from cash bookings after repeated no-shows."""
+
+    code = "cash_disabled_for_user"
+    status_code = 403
+
+
+class UnsupportedPaymentMethodError(HoldError):
+    """Phase 6 only ships cash; bKash slot reserved for the next phase."""
+
+    code = "unsupported_payment_method"
+    status_code = 400
+
+
+# Threshold of auto-cancelled cash bookings before the user is blacklisted from
+# placing more cash holds. Keep in code, not env, to make the rule legible.
+NO_SHOW_BLACKLIST_THRESHOLD: int = 3
+
+
 # ---------------------------------------------------------------------------
 # Inputs / outputs
 # ---------------------------------------------------------------------------
@@ -124,8 +150,9 @@ class HoldSlotInput:
 class HoldResult:
     booking_id: int
     public_id: str
-    hold_token: str
-    hold_expires_at: datetime
+    payment_method: str  # "online" (Phase 7+) | "cash"
+    hold_token: str | None  # populated only for online holds
+    hold_expires_at: datetime | None
     subtotal_bdt: int
     discount_code: str | None
     discount_amount_bdt: int
@@ -150,14 +177,24 @@ async def hold_slots(
     user: User,
     venue_id: int,
     slot_inputs: Sequence[HoldSlotInput],
+    payment_method: str = "online",
     discount_code: str | None = None,
     now: datetime | None = None,
 ) -> HoldResult:
     """Lock + persist a multi-slot hold for `user`.
 
-    See module docstring for the full sequence. Atomic w.r.t. concurrent calls
-    by the same user OR another user targeting overlapping slots.
+    `payment_method` controls the lifecycle:
+      - "online" (Phase 7+ bKash): booking starts in pending_payment, Redis
+        holds the slots for 8 minutes while the user pays.
+      - "cash": booking is committed straight to confirmed with
+        payment_collection=cash_pending. No Redis hold; the GIST exclusion
+        constraint guards the slot. The auto-cancel cron transitions
+        unpaid cash bookings shortly before the slot starts.
     """
+    if payment_method not in ("online", "cash"):
+        raise UnsupportedPaymentMethodError()
+    if payment_method == "cash" and user.cash_disabled:
+        raise CashDisabledError()
     if not slot_inputs:
         raise NoSlotsRequestedError()
     if now is None:
@@ -273,20 +310,25 @@ async def hold_slots(
 
     matched.sort(key=lambda m: m[0])
 
-    # Acquire Redis locks atomically.
-    hold_token = generate_hold_token()
-    ttl = hold_ttl_seconds()
     starts = [m[0] for m in matched]
-    try:
-        await acquire_slot_locks(
-            redis,
-            venue_id=venue_id,
-            slot_starts=starts,
-            hold_token=hold_token,
-            ttl_seconds=ttl,
-        )
-    except SlotLockConflictError as e:
-        raise SlotLockConflictHoldError() from e
+    is_online = payment_method == "online"
+
+    # Online holds use Redis as a UX-layer 8-min hold; cash bookings skip the
+    # lock since the slot commits straight to confirmed and GIST guards it.
+    hold_token: str | None = generate_hold_token() if is_online else None
+    ttl = hold_ttl_seconds() if is_online else 0
+    if is_online:
+        assert hold_token is not None  # narrowing for type checker
+        try:
+            await acquire_slot_locks(
+                redis,
+                venue_id=venue_id,
+                slot_starts=starts,
+                hold_token=hold_token,
+                ttl_seconds=ttl,
+            )
+        except SlotLockConflictError as e:
+            raise SlotLockConflictHoldError() from e
 
     # Persist Booking + BookingSlot rows. GIST is the safety net.
     try:
@@ -313,20 +355,23 @@ async def hold_slots(
                 discount_code_id = discount_resolution.discount.id
                 discount_amount_bdt = discount_resolution.amount_off_bdt
             except DiscountInvalidError as exc:
-                # Roll the lock back before raising so the user can retry.
-                await release_slot_locks(
-                    redis, venue_id=venue_id, slot_starts=starts, hold_token=hold_token
-                )
+                if is_online and hold_token is not None:
+                    await release_slot_locks(
+                        redis, venue_id=venue_id, slot_starts=starts, hold_token=hold_token
+                    )
                 raise DiscountRejectedError(exc.code) from exc
 
         total_bdt = max(0, subtotal - discount_amount_bdt)
+
+        booking_status = BookingStatus.PENDING_PAYMENT if is_online else BookingStatus.CONFIRMED
+        collection = PaymentCollection.ONLINE if is_online else PaymentCollection.CASH_PENDING
 
         booking = Booking(
             public_id="TRF-PENDING",  # placeholder; rewritten after id is known
             user_id=user.id,
             venue_id=venue_id,
             booking_source=BookingSource.WEB,
-            payment_collection=PaymentCollection.ONLINE,
+            payment_collection=collection,
             subtotal_bdt=subtotal,
             discount_code_id=discount_code_id,
             discount_amount_bdt=discount_amount_bdt,
@@ -334,9 +379,9 @@ async def hold_slots(
             slot_count=len(matched),
             first_slot_at=first_start,
             last_slot_at=last_end,
-            status=BookingStatus.PENDING_PAYMENT,
+            status=booking_status,
             hold_token=hold_token,
-            hold_expires_at=now + timedelta(seconds=ttl),
+            hold_expires_at=(now + timedelta(seconds=ttl)) if is_online else None,
         )
         db.add(booking)
         await db.flush()  # populates booking.id
@@ -351,7 +396,7 @@ async def hold_slots(
                     slot_start_at=start_at,
                     slot_end_at=end_at,
                     price_bdt=price,
-                    booking_status=BookingStatus.PENDING_PAYMENT,
+                    booking_status=booking_status,
                 )
             )
 
@@ -367,18 +412,20 @@ async def hold_slots(
         await db.commit()
     except IntegrityError as e:
         await db.rollback()
-        await release_slot_locks(
-            redis, venue_id=venue_id, slot_starts=starts, hold_token=hold_token
-        )
+        if is_online and hold_token is not None:
+            await release_slot_locks(
+                redis, venue_id=venue_id, slot_starts=starts, hold_token=hold_token
+            )
         # GIST exclusion message is the recognizable signature.
         if "ex_booking_slot_no_overlap" in str(e):
             raise SlotLockConflictHoldError() from e
         raise
     except Exception:
         await db.rollback()
-        await release_slot_locks(
-            redis, venue_id=venue_id, slot_starts=starts, hold_token=hold_token
-        )
+        if is_online and hold_token is not None:
+            await release_slot_locks(
+                redis, venue_id=venue_id, slot_starts=starts, hold_token=hold_token
+            )
         raise
 
     logger.info(
@@ -395,13 +442,12 @@ async def hold_slots(
         ttl_seconds=ttl,
     )
 
-    expires = booking.hold_expires_at
-    assert expires is not None  # always set above on the new booking
     return HoldResult(
         booking_id=booking.id,
         public_id=booking.public_id,
+        payment_method=payment_method,
         hold_token=hold_token,
-        hold_expires_at=expires,
+        hold_expires_at=booking.hold_expires_at,
         subtotal_bdt=subtotal,
         discount_code=discount_code,
         discount_amount_bdt=discount_amount_bdt,
@@ -491,6 +537,133 @@ async def reconcile_expired_holds(
     for b in expired_bookings:
         await expire_hold(db, redis, booking=b, reason="expired")
         count += 1
+    return count
+
+
+async def mark_cash_paid(
+    db: AsyncSession,
+    *,
+    booking: Booking,
+    actor: User,
+    now: datetime | None = None,
+) -> Payment:
+    """Admin/staff records a cash payment for an in-person booking.
+
+    Inserts a `payments` row (provider=cash, status=completed) and clears the
+    cash_pending flag by switching `payment_collection` to CASH. Idempotent:
+    if a successful cash payment already exists, returns it without creating
+    a duplicate.
+    """
+    if booking.payment_collection not in (
+        PaymentCollection.CASH_PENDING,
+        PaymentCollection.CASH,
+    ):
+        raise HoldError("booking_not_cash")
+    if booking.status not in (BookingStatus.CONFIRMED, BookingStatus.COMPLETED):
+        raise HoldError("booking_not_payable")
+
+    if now is None:
+        now = datetime.now(UTC)
+
+    # Idempotency: surface the existing completed payment if any.
+    existing = (
+        (
+            await db.execute(
+                select(Payment).where(
+                    Payment.booking_id == booking.id,
+                    Payment.provider == PaymentProvider.CASH,
+                    Payment.status == PaymentStatus.COMPLETED,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing is not None:
+        return existing
+
+    payment = Payment(
+        booking_id=booking.id,
+        provider=PaymentProvider.CASH,
+        amount_bdt=booking.total_amount_bdt,
+        status=PaymentStatus.COMPLETED,
+        collected_by_admin_id=actor.id,
+        completed_at=now,
+    )
+    db.add(payment)
+    booking.payment_collection = PaymentCollection.CASH
+    await db.commit()
+    logger.info(
+        "booking.cash.marked_paid",
+        booking_id=booking.id,
+        public_id=booking.public_id,
+        actor_id=actor.id,
+    )
+    return payment
+
+
+async def reconcile_unpaid_cash_bookings(
+    db: AsyncSession,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """Auto-cancel cash bookings approaching their first slot without payment.
+
+    A booking is auto-cancelled when:
+      - status is `confirmed`
+      - payment_collection is `cash_pending`
+      - `now() + venue.cash_cancel_minutes_before` is past first_slot_at
+
+    Each auto-cancellation increments the user's `no_show_count` and toggles
+    `cash_disabled=true` once the threshold is crossed. Returns the number of
+    bookings transitioned.
+    """
+    if now is None:
+        now = datetime.now(UTC)
+
+    rows = (
+        await db.execute(
+            select(Booking, Venue)
+            .join(Venue, Venue.id == Booking.venue_id)
+            .where(
+                Booking.status == BookingStatus.CONFIRMED,
+                Booking.payment_collection == PaymentCollection.CASH_PENDING,
+            )
+        )
+    ).all()
+
+    count = 0
+    for booking, venue in rows:
+        deadline = booking.first_slot_at - timedelta(minutes=venue.cash_cancel_minutes_before)
+        if now < deadline:
+            continue
+
+        booking.status = BookingStatus.AUTO_CANCELLED_NO_PAYMENT
+        booking.cancelled_at = now
+        booking.cancellation_reason = "cash_not_received_before_slot"
+
+        # Bump the user's no-show counter and auto-blacklist on threshold.
+        user = (
+            await db.execute(select(User).where(User.id == booking.user_id))
+        ).scalar_one_or_none()
+        if user is not None:
+            user.no_show_count += 1
+            if user.no_show_count >= NO_SHOW_BLACKLIST_THRESHOLD:
+                user.cash_disabled = True
+
+        await void_discount_for_booking(db, booking_id=booking.id)
+        await db.commit()
+
+        logger.info(
+            "booking.cash.auto_cancelled",
+            booking_id=booking.id,
+            public_id=booking.public_id,
+            user_id=booking.user_id,
+            no_show_count=getattr(user, "no_show_count", None),
+            cash_disabled=getattr(user, "cash_disabled", None),
+        )
+        count += 1
+
     return count
 
 

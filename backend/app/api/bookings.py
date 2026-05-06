@@ -8,7 +8,7 @@ state transitions exposed are: create-hold, read-status, cancel-hold-while-pendi
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -17,16 +17,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.enums import BookingStatus, UserRole
+from app.enums import BookingStatus, PaymentCollection, UserRole
 from app.models import Booking, BookingSlot
 from app.redis_client import get_redis
-from app.security.deps import CurrentUser
+from app.security.deps import CurrentUser, StaffOrAdmin
 from app.services.bookings import (
     HoldError,
     HoldSlotInput,
     expire_hold,
     hold_slots,
+    mark_cash_paid,
     reconcile_expired_holds,
+    reconcile_unpaid_cash_bookings,
 )
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
@@ -50,13 +52,15 @@ class HoldRequest(BaseModel):
     venue_id: int
     slots: list[HoldSlotIn] = Field(..., min_length=1, max_length=MAX_SLOTS_PER_HOLD)
     discount_code: str | None = Field(default=None, max_length=64)
+    payment_method: Literal["online", "cash"] = "online"
 
 
 class HoldResponse(BaseModel):
     booking_id: int
     public_id: str
-    hold_token: str
-    hold_expires_at: datetime
+    payment_method: str
+    hold_token: str | None
+    hold_expires_at: datetime | None
     subtotal_bdt: int
     discount_code: str | None
     discount_amount_bdt: int
@@ -74,6 +78,7 @@ class BookingStatusResponse(BaseModel):
     booking_id: int
     public_id: str
     status: BookingStatus
+    payment_collection: PaymentCollection
     venue_id: int
     total_bdt: int
     subtotal_bdt: int
@@ -130,6 +135,7 @@ async def _to_status_response(
         booking_id=booking.id,
         public_id=booking.public_id,
         status=booking.status,
+        payment_collection=booking.payment_collection,
         venue_id=booking.venue_id,
         total_bdt=booking.total_amount_bdt,
         subtotal_bdt=booking.subtotal_bdt,
@@ -172,6 +178,7 @@ async def create_hold(
             user=user,
             venue_id=body.venue_id,
             slot_inputs=inputs,
+            payment_method=body.payment_method,
             discount_code=body.discount_code,
         )
     except HoldError as e:
@@ -180,6 +187,7 @@ async def create_hold(
     return HoldResponse(
         booking_id=result.booking_id,
         public_id=result.public_id,
+        payment_method=result.payment_method,
         hold_token=result.hold_token,
         hold_expires_at=result.hold_expires_at,
         subtotal_bdt=result.subtotal_bdt,
@@ -194,10 +202,10 @@ async def create_hold(
 async def read_status(
     booking_id: int, user: CurrentUser, db: DbDep, redis: RedisDep
 ) -> BookingStatusResponse:
-    # Lazy reconciliation: sweep expired pending holds before reading state.
-    # This is a small write on the read path but keeps the system honest in
-    # the absence of a dedicated worker.
+    # Lazy reconciliation: sweep expired pending holds + unpaid cash bookings
+    # before reading state. Keeps an idle deployment honest without a worker.
     await reconcile_expired_holds(db, redis)
+    await reconcile_unpaid_cash_bookings(db)
 
     booking = await _load_booking_for_user(db, booking_id=booking_id, user=user)
     return await _to_status_response(db, booking, now=datetime.now(UTC))
@@ -212,5 +220,40 @@ async def cancel_hold(
         raise HTTPException(status_code=409, detail="booking_not_pending")
 
     await expire_hold(db, redis, booking=booking, reason="cancelled")
+    await db.refresh(booking)
+    return await _to_status_response(db, booking, now=datetime.now(UTC))
+
+
+# ---------------------------------------------------------------------------
+# Admin: cash payment recording
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{booking_id}/mark-cash-paid",
+    response_model=BookingStatusResponse,
+    tags=["admin"],
+)
+async def mark_cash_paid_endpoint(
+    booking_id: int,
+    actor: StaffOrAdmin,
+    db: DbDep,
+) -> BookingStatusResponse:
+    """Staff or admin records receipt of cash for an in-person booking.
+
+    Idempotent: re-calling on a booking already marked paid returns 200 with
+    the same payment row referenced.
+    """
+    booking = (
+        await db.execute(select(Booking).where(Booking.id == booking_id))
+    ).scalar_one_or_none()
+    if booking is None:
+        raise HTTPException(status_code=404, detail="booking_not_found")
+
+    try:
+        await mark_cash_paid(db, booking=booking, actor=actor)
+    except HoldError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e)) from e
+
     await db.refresh(booking)
     return await _to_status_response(db, booking, now=datetime.now(UTC))

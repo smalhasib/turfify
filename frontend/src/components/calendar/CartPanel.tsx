@@ -6,9 +6,14 @@ import { type FormEvent, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { useAuthHydrated, useAuthStore } from "@/lib/authStore";
-import { createHold, validateDiscountCode } from "@/lib/bookings";
+import {
+  createHold,
+  type PaymentMethod,
+  validateDiscountCode,
+} from "@/lib/bookings";
 import { formatPriceBdt } from "@/lib/calendar";
 import { type CartSlot, useCartStore } from "@/lib/cartStore";
+import { cn } from "@/lib/cn";
 
 function CartRow({ slot }: { slot: CartSlot }) {
   const remove = useCartStore((s) => s.remove);
@@ -48,6 +53,9 @@ export function CartPanel() {
   const [codeDraft, setCodeDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Phase 6: cash is the only available method. Online is reserved for the
+  // bKash phase but kept in the picker as a disabled option to show intent.
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
 
   const total = useMemo(() => {
     if (discount.kind !== "ok") return subtotal;
@@ -123,6 +131,7 @@ export function CartPanel() {
         venue_id: venueId,
         slots: slots.map((s) => ({ start_at: s.startAt })),
         discount_code: discount.kind === "ok" ? discount.code : null,
+        payment_method: paymentMethod,
       });
       clear();
       router.push(`/booking/${result.booking_id}`);
@@ -211,6 +220,51 @@ export function CartPanel() {
         </div>
       )}
 
+      {/* Payment method */}
+      <fieldset
+        className="flex flex-col gap-2xs"
+        data-testid="payment-method"
+        aria-label="Payment method"
+      >
+        <legend className="label-caps text-ink-soft">Payment</legend>
+        <div className="grid grid-cols-2 gap-2xs">
+          <button
+            type="button"
+            onClick={() => setPaymentMethod("cash")}
+            data-testid="pay-cash"
+            data-selected={paymentMethod === "cash" ? "true" : undefined}
+            aria-pressed={paymentMethod === "cash"}
+            className={cn(
+              "flex flex-col gap-3xs rounded-xs border px-sm py-2xs text-left transition duration-150 ease-snap",
+              paymentMethod === "cash"
+                ? "border-accent bg-accent text-[oklch(0.18_0.02_145)]"
+                : "border-rule bg-bg text-ink hover:border-rule-strong",
+            )}
+          >
+            <span className="text-sm font-semibold">Cash on arrival</span>
+            <span
+              className={cn(
+                "text-xs",
+                paymentMethod === "cash"
+                  ? "text-[oklch(0.18_0.02_145)]"
+                  : "text-ink-soft",
+              )}
+            >
+              Pay at the gate
+            </span>
+          </button>
+          <button
+            type="button"
+            disabled
+            data-testid="pay-online"
+            className="flex cursor-not-allowed flex-col gap-3xs rounded-xs border border-rule bg-bg px-sm py-2xs text-left opacity-50"
+          >
+            <span className="text-sm font-semibold">bKash online</span>
+            <span className="text-xs text-ink-mute">Coming soon</span>
+          </button>
+        </div>
+      </fieldset>
+
       {/* Totals */}
       <div className="flex flex-col gap-2xs border-t border-rule pt-2xs">
         <div className="flex items-baseline justify-between text-sm">
@@ -257,7 +311,11 @@ export function CartPanel() {
         size="lg"
         data-testid="cart-continue"
       >
-        {accessToken ? "Hold for 8 minutes" : "Sign in to continue"}
+        {accessToken
+          ? paymentMethod === "cash"
+            ? "Confirm cash booking"
+            : "Hold for 8 minutes"
+          : "Sign in to continue"}
       </Button>
     </aside>
   );

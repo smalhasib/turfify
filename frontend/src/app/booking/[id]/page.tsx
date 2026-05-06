@@ -20,7 +20,7 @@ const STATUS_COPY: Record<BookingStatus, { label: string; tone: "live" | "ok" | 
   expired: { label: "Hold expired", tone: "ended" },
   failed: { label: "Payment failed", tone: "ended" },
   cancelled: { label: "Cancelled", tone: "ended" },
-  auto_cancelled_no_payment: { label: "Auto-cancelled", tone: "ended" },
+  auto_cancelled_no_payment: { label: "Cancelled — no-show", tone: "ended" },
   payment_received_no_slot: { label: "Refund pending", tone: "ended" },
   refund_pending: { label: "Refund pending", tone: "ended" },
   refunded: { label: "Refunded", tone: "ended" },
@@ -129,6 +129,9 @@ export default function BookingStatusPage() {
 
   const copy = STATUS_COPY[booking.status];
   const isPending = booking.status === "pending_payment";
+  const isCashPending =
+    booking.status === "confirmed" &&
+    booking.payment_collection === "cash_pending";
 
   return (
     <>
@@ -171,8 +174,25 @@ export default function BookingStatusPage() {
               {formatCountdown(seconds)}
             </p>
             <p className="text-xs text-ink-soft">
-              Payment integration ships in Phase 6 — for now, you can release the hold
-              by cancelling.
+              Online payment ships with bKash. For now, the hold releases when
+              cancelled.
+            </p>
+          </div>
+        )}
+
+        {isCashPending && (
+          <div
+            className="flex flex-col gap-2xs rounded-md border border-accent bg-surface px-md py-sm"
+            data-testid="cash-awaiting"
+          >
+            <p className="label-caps text-accent-deep">Awaiting payment</p>
+            <p className="stadium-display text-3xl uppercase text-ink">
+              Pay at the gate
+            </p>
+            <p className="text-xs text-ink-soft">
+              Bring your booking ID. Staff confirms cash and you&apos;re on the
+              pitch. Slot auto-cancels if cash isn&apos;t collected before
+              kickoff.
             </p>
           </div>
         )}
