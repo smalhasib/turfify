@@ -22,7 +22,7 @@ export default function HomePage() {
             </p>
             <div className="flex flex-wrap items-center gap-xs pt-2xs">
               <Link
-                href="/login"
+                href="/book"
                 className="inline-flex min-h-[48px] items-center gap-2 rounded-sm bg-accent px-lg py-xs font-sans text-base font-semibold uppercase tracking-wide text-[oklch(0.18_0.02_145)] transition-transform duration-150 ease-snap hover:bg-accent-deep hover:text-[oklch(0.96_0.01_95)] active:translate-y-px"
                 data-testid="cta-signin"
               >
