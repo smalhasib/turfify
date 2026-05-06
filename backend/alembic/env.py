@@ -1,8 +1,4 @@
-"""Alembic migration environment.
-
-Models are introduced in Phase 1; this file currently runs migrations against an
-empty MetaData. Phase 1 will register `Base.metadata` here.
-"""
+"""Alembic migration environment."""
 
 from __future__ import annotations
 
@@ -13,6 +9,7 @@ from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from app.config import get_settings
+from app.models import Base
 
 config = context.config
 
@@ -25,8 +22,7 @@ settings = get_settings()
 sync_url = settings.database_url.replace("+asyncpg", "+psycopg")
 config.set_main_option("sqlalchemy.url", os.getenv("ALEMBIC_DATABASE_URL", sync_url))
 
-# Phase 1 will replace this with the real Base.metadata.
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

@@ -40,14 +40,21 @@ def redis_container() -> Generator[RedisContainer]:
 
 @pytest_asyncio.fixture(scope="session")
 async def test_engine(postgres_container: PostgresContainer) -> AsyncGenerator[Any]:
+    """Build an async engine and apply Alembic migrations once per session."""
+    import os
+
+    from alembic.config import Config
+
+    from alembic import command
+
     url = postgres_container.get_connection_url()
     engine = create_async_engine(url, echo=False, pool_pre_ping=True)
 
-    # Enable btree_gist (needed in Phase 1; harmless to enable now).
-    from sqlalchemy import text
-
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS btree_gist"))
+    sync_url = url.replace("+asyncpg", "+psycopg")
+    os.environ["ALEMBIC_DATABASE_URL"] = sync_url
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", sync_url)
+    command.upgrade(cfg, "head")
 
     yield engine
     await engine.dispose()
@@ -58,6 +65,31 @@ async def db_session(test_engine: Any) -> AsyncGenerator[AsyncSession]:
     factory = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
         yield session
+
+
+@pytest_asyncio.fixture
+async def clean_db(test_engine: Any) -> AsyncGenerator[None]:
+    """Truncate data tables after each test to keep tests isolated."""
+    from sqlalchemy import text
+
+    yield
+    tables = [
+        "discount_redemptions",
+        "refunds",
+        "payments",
+        "booking_slots",
+        "bookings",
+        "discount_codes",
+        "pricing_rules",
+        "slot_overrides",
+        "schedule_exceptions",
+        "audit_log",
+        "outbound_messages",
+        "users",
+        "venues",
+    ]
+    async with test_engine.begin() as conn:
+        await conn.execute(text(f"TRUNCATE {', '.join(tables)} RESTART IDENTITY CASCADE"))
 
 
 @pytest_asyncio.fixture
