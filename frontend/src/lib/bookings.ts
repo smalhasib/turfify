@@ -111,3 +111,18 @@ export async function cancelHold(id: number): Promise<BookingStatusResponse> {
   );
   return data;
 }
+
+export async function downloadReceipt(id: number, publicId: string): Promise<void> {
+  const resp = await getApiClient().get<Blob>(`/bookings/${id}/receipt.pdf`, {
+    responseType: "blob",
+  });
+  const blob = new Blob([resp.data], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Receipt-${publicId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

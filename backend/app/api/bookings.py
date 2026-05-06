@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import select
@@ -30,6 +30,7 @@ from app.services.bookings import (
     reconcile_expired_holds,
     reconcile_unpaid_cash_bookings,
 )
+from app.services.receipts import render_receipt_pdf
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -257,3 +258,28 @@ async def mark_cash_paid_endpoint(
 
     await db.refresh(booking)
     return await _to_status_response(db, booking, now=datetime.now(UTC))
+
+
+# ---------------------------------------------------------------------------
+# PDF receipt download
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{booking_id}/receipt.pdf", response_class=Response)
+async def download_receipt(
+    booking_id: int, request: Request, user: CurrentUser, db: DbDep
+) -> Response:
+    """Generate + stream the booking receipt as a PDF.
+
+    Auth: owner or admin/staff (via _load_booking_for_user).
+    """
+    booking = await _load_booking_for_user(db, booking_id=booking_id, user=user)
+
+    base_url = str(request.base_url).rstrip("/")
+    pdf = await render_receipt_pdf(db, booking=booking, base_url=base_url)
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="Receipt-{booking.public_id}.pdf"',
+        "Cache-Control": "private, max-age=300",
+    }
+    return Response(content=pdf, media_type="application/pdf", headers=headers)

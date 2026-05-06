@@ -366,6 +366,75 @@ test.describe("Phase 4 cart + hold", () => {
     await expect(page.getByTestId("cash-awaiting")).toBeVisible();
     await expect(page.getByTestId("hold-countdown")).not.toBeVisible();
     await expect(page.getByTestId("booking-total")).toHaveText("BDT 1,000");
+    await expect(page.getByTestId("download-receipt")).toBeVisible();
+  });
+
+  test("Receipt download fires PDF request", async ({ page }) => {
+    await page.addInitScript(() => {
+      const value = {
+        state: {
+          accessToken: "stub-access-token",
+          refreshToken: "stub-refresh-token",
+          user: {
+            id: 99,
+            phone: "+8801712345678",
+            name: null,
+            email: null,
+            role: "customer",
+          },
+        },
+        version: 0,
+      };
+      window.localStorage.setItem("turfify-auth", JSON.stringify(value));
+    });
+
+    await page.route("**/v1/bookings/77/status", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          booking_id: 77,
+          public_id: "TRF-2026-000077",
+          status: "confirmed",
+          payment_collection: "cash",
+          venue_id: 1,
+          total_bdt: 1500,
+          subtotal_bdt: 1500,
+          discount_amount_bdt: 0,
+          admin_adjustment_bdt: 0,
+          slot_count: 1,
+          first_slot_at: "2026-05-12T10:00:00Z",
+          last_slot_at: "2026-05-12T11:00:00Z",
+          hold_expires_at: null,
+          seconds_to_expiry: null,
+          slots: [
+            {
+              slot_start_at: "2026-05-12T10:00:00Z",
+              slot_end_at: "2026-05-12T11:00:00Z",
+              price_bdt: 1500,
+            },
+          ],
+          created_at: new Date().toISOString(),
+        }),
+      });
+    });
+
+    let receiptCalled = false;
+    await page.route("**/v1/bookings/77/receipt.pdf", async (route) => {
+      receiptCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/pdf",
+        body: "%PDF-1.4\n%fake\n",
+      });
+    });
+
+    await page.goto("/booking/77");
+    await expect(page.getByTestId("download-receipt")).toBeVisible();
+    await page.getByTestId("download-receipt").click();
+    // Allow time for the route handler to fire.
+    await page.waitForTimeout(500);
+    expect(receiptCalled).toBe(true);
   });
 
   test("bKash option is disabled for now", async ({ page }) => {

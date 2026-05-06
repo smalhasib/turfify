@@ -8,6 +8,7 @@ import { Header } from "@/components/ui/Header";
 import { useAuthHydrated, useAuthStore } from "@/lib/authStore";
 import {
   cancelHold,
+  downloadReceipt,
   fetchBookingStatus,
   type BookingStatus,
   type BookingStatusResponse,
@@ -260,6 +261,13 @@ export default function BookingStatusPage() {
               Cancel hold
             </Button>
           )}
+          <Button
+            variant="outline"
+            onClick={() => downloadReceipt(booking.booking_id, booking.public_id)}
+            data-testid="download-receipt"
+          >
+            Download receipt
+          </Button>
           <Button variant="ghost" onClick={() => router.push("/book")}>
             Back to calendar
           </Button>
